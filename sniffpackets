@@ -1,0 +1,143 @@
+#bucky
+
+import socket
+import struct
+import textwrap
+
+TAB_1 = '\t - '
+TAB_2 = '\t\t - '
+TAB_3 = '\t\t\t - '
+TAB_4 = '\t\t\t\t - '
+
+DATA_TAB_1 = '\t '
+DATA_TAB_2 = '\t\t '
+DATA_TAB_3 = '\t\t\t '
+DATA_TAB_4 = '\t\t\t\t '
+DATA_TAB_1 = '\t   '
+DATA_TAB_2 = '\t\t   '
+DATA_TAB_3 = '\t\t\t   '
+DATA_TAB_4 = '\t\t\t\t   '
+
+def main():
+
+
+    conn= socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))#ntohs tho check big in small in
+
+    #listen for data
+    while True:
+        raw_data, addr = conn.recvfrom(65535)
+        dest_mac, src_mac, eth_proto, data= ethernet_frame(raw_data)
+        print('\nEthernet Frame: ')
+        print(TAB_1+ 'Destination: {}, Source: {}, Protocol: {}'.format(dest_mac,src_mac, eth_proto))
+
+
+        # 8 for ipv4
+        if eth_proto ==8:
+            version, header_length, ttl, proto, src, target=ipc4_packet(data)
+            print(TAB_1 + 'IPv4 Packet: ')
+            print(TAB_2 + 'Version: {}, Header Length: {}, TTL: {} '.format(version, header_length, ttl))
+            print(TAB_2 + 'Protocol: {}, Source: {}, Target: {}'.format( proto, src, target))
+
+            #check if  ICP
+            if proto == 1:
+                icmp_type, code, checksum, data = icmp_packet(data)
+                print(TAB_1 + 'ICMP Packet: ')
+                print(TAB_2 + 'Type: {}, Code: {}, Checksum: {}'.format( icmp_type, code, checksum))
+                print(TAB_2 + 'Data: ')
+                print(format_multi_line(DATA_TAB_3,data))
+
+            elif proto ==6:
+                src_port, dest_port, sequence, acknowledgement, flag_ack, flag_fin, flag_psh, flag_rst, flag_sys, flag_urg, data = tcp_segment(data)
+                print(TAB_1 +'TCP Segment: ')
+                print(TAB_2 + 'Source Port: {}, Dest Port: {}'.format(src_port,dest_port))
+                print(TAB_2 + 'Sequence: {}, Acknowledgment: {}'.format(sequence,acknowledgement))
+                print(TAB_3 + 'Flags:')
+                print(TAB_3 + 'URG: {}, ACK: {}, PSH: {}, RST: {}, FIN: {}'.format( flag_urg, flag_ack, flag_psh, flag_sys, flag_rst, flag_fin))
+                print(TAB_2 + 'Data: ')
+                print(format_multi_line(DATA_TAB_3,data))
+
+            elif proto == 17:
+                src_port, dest_port, length, data = udp_segment(data)
+                print(TAB_1 + 'UDP SEGMENT: ')
+                print(TAB_2 + 'Source Port: {}, Destination Port: {}, Length: {}'.format(src_port, dest_port, length))
+
+            else:
+                print(TAB_1 + 'Data: ')
+                print(format_multi_line(DATA_TAB_2, data))
+
+
+
+
+
+#unpacking ethernet frame
+def ethernet_frame(data):#using ! to convert big indenan to small indian
+    dest_mac, src_mac, proto = struct.unpack('! 6s 6s H', data[:14])#take those data..
+    return get_mac_addr(dest_mac),get_mac_addr(src_mac), socket.htons(proto), data[14:]
+    #htons takes your bytes and make it compatabile big/small indian
+
+
+#returns properly formatted MAC address(AA:BB:CC:DD:EE:FF)
+def get_mac_addr(bytes_addr):
+    bytes_str= map('{:02x}'.format,bytes_addr)
+    #map is funciton that pass funciton thorugh it which you want to repeat multipe times
+    return':'.join(bytes_str).upper() # join again
+
+#unpack IPv4
+def ipc4_packet(data):
+    version_header_length = data[0]# first byte
+    version = version_header_length >>4 #take the first 4 bits
+    header_length = (version_header_length & 15 )* 4 # use AND
+    ttl,proto,src,target = struct.unpack('! 8x B B 2x 4s 4s', data[:20]) # 20bytes long
+    return version, header_length, ttl,proto,ipv4(src),ipv4(target)
+
+def ipv4(addr):  #function to format IP adderss
+    return '.'.join(map(str,addr))
+
+
+#unpack icmp packets
+def icmp_packet(data):
+    icmp_type, code, checksum = struct.unpack('! B B H', data [:4])
+    return icmp_type, code, checksum, data[4:]
+
+#unpack tcp packets
+def tcp_segment(data):
+    (src_port, dest_port, sequence, acknowledgement, offset_reserved_flag) = struct.unpack('! H H L L H', data[:14])
+    offset = (offset_reserved_flag >> 12 )* 4
+    flag_urg = (offset_reserved_flag & 32 )>> 5
+    flag_ack = (offset_reserved_flag & 16) >> 4
+    flag_psh = (offset_reserved_flag & 8) >>  3
+    flag_rst = (offset_reserved_flag & 4) >>  3
+    flag_sys = (offset_reserved_flag & 2) >>  1
+    flag_fin = (offset_reserved_flag & 1)
+    return src_port, dest_port, sequence, acknowledgement, flag_ack, flag_fin, flag_psh, flag_rst, flag_sys, flag_urg, data[offset:]
+
+#unpack upd
+def udp_segment(data):
+    src_port, dest_port, size = struct.unpack('! H H 2X H', data[:8])
+    return src_port, dest_port, size, data[8:]
+
+#foramt multi line data
+def format_multi_line(prefix, string, size=80):
+    size -= len(prefix)
+    if isinstance(string, bytes):
+        string=''.join(r'\x{:02x}'.format(byte) for byte in string)
+
+        if size%2:
+            size -= 1
+
+    return '\n'.join([prefix + line for line in textwrap.wrap(string, size)]) #break the lines for better present
+
+
+
+
+
+main()
+
+
+
+
+
+
+
+
+
